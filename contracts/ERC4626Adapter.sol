@@ -94,6 +94,12 @@ contract ERC4626Adapter is IERC4626Adapter, ERC4626, Ownable {
         _setFeeCollector(collector);
     }
 
+    function _computeLoss() internal view returns (uint256) {
+        uint256 currentTotalAssets = totalAssets();
+        if (currentTotalAssets < previousTotalAssets) return previousTotalAssets - currentTotalAssets;
+        return 0;
+    }
+
     /**
      * @dev Deposits assets into an ERC4626 through the adapter
      * @param caller Address of the caller
@@ -102,6 +108,8 @@ contract ERC4626Adapter is IERC4626Adapter, ERC4626, Ownable {
      * @param shares Amount of shares to be minted
      */
     function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal override {
+        uint256 loss = _computeLoss();
+
         _settleFees();
 
         super._deposit(caller, receiver, assets, shares);
@@ -109,7 +117,9 @@ contract ERC4626Adapter is IERC4626Adapter, ERC4626, Ownable {
         IERC20(erc4626.asset()).approve(address(erc4626), assets);
         erc4626.deposit(assets, address(this));
 
-        previousTotalAssets = totalAssets();
+        // If there's a loss, the loss isn't accounted in the previousTotalAssets, so we don't have negative
+        // fees, but losses still go against future gains.
+        previousTotalAssets = totalAssets() + loss;
     }
 
     /**
@@ -124,13 +134,17 @@ contract ERC4626Adapter is IERC4626Adapter, ERC4626, Ownable {
         internal
         override
     {
+        uint256 loss = _computeLoss();
+
         _settleFees();
 
         erc4626.withdraw(assets, address(this), address(this));
 
         super._withdraw(caller, receiver, owner, assets, shares);
 
-        previousTotalAssets = totalAssets();
+        // If there's a loss, the loss isn't accounted in the previousTotalAssets, so we don't have negative
+        // fees, but losses still go against future gains.
+        previousTotalAssets = totalAssets() + loss;
     }
 
     /**
